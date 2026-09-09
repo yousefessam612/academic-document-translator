@@ -1,14 +1,6 @@
----
-title: Academic Document Translator
-emoji: 🌐
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Academic Document Translator
+
+[![Deploy to Koyeb](https://www.koyeb.com/svg/deploy_to_koyeb.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/yousefessam612/academic-document-translator&branch=master&builder=dockerfile)
 
 A production-ready web application that translates large academic, scientific, educational, and technical documents from **English to Arabic** using an **AgentRouter-compatible LLM API**, producing a fully formatted, right-to-left Arabic Microsoft Word (.docx) document.
 

@@ -1,49 +1,52 @@
 # Deployment Guide
 
-The app runs anywhere that can run the provided `Dockerfile` (multi-stage:
-Node builds the React frontend, Python 3.12 runs FastAPI + Tesseract OCR,
-FastAPI serves the built SPA on one port).
+The app ships as a self-contained Docker image (multi-stage: Node builds the
+React frontend, Python 3.12 runs FastAPI + Tesseract OCR, FastAPI serves the
+built SPA on one port). Default port: 8000 (overridable via `PORT`).
 
-## Option A — Hugging Face Spaces (recommended, free)
+## Option A — Koyeb (recommended: free forever, usually NO credit card)
 
-Free CPU tier: 2 vCPU / 16 GB RAM. The Space stays up 48h of inactivity
-before sleeping; waking takes ~30s on the next visit and the public link never
-changes.
+Free tier: 1 web service, 0.1 vCPU, 512 MB RAM, 2 GB SSD. Scales to zero
+after ~1 hour of inactivity (cold start 10-60s), URL is permanent.
 
-1. Create a free account at https://huggingface.co (you can sign in with GitHub).
-2. Settings → Access Tokens → create a token with **write** permission.
-3. Create a Docker Space (or let the deploy script create it):
-   ```powershell
-   .\backend\.venv\Scripts\pip.exe install huggingface_hub
-   $env:HF_TOKEN = "hf_xxx"
-   .\scripts\deploy_hf.ps1
-   ```
-   The script creates the Space, sets `AGENTROUTER_API_KEY` etc. as Space
-   secrets, and pushes the repo.
-4. Your permanent link: `https://<username>-academic-document-translator.hf.space`
+1. Open the deploy link (or click the badge in the README):
+   https://app.koyeb.com/deploy?type=git&repository=github.com/yousefessam612/academic-document-translator&branch=master&builder=dockerfile
+2. Sign up / log in **with GitHub** (no card for most users).
+3. In the service configuration, add an environment variable:
+   - `AGENTROUTER_API_KEY` = your AgentRouter key (required)
+   - optional: `AGENTROUTER_MODEL` (default `glm-5.3`)
+4. Create the service — Koyeb builds the Dockerfile and gives you a permanent
+   URL like `https://academic-document-translator-xxxx.koyeb.app`.
 
-**Secrets** (Space → Settings → Variables and secrets): `AGENTROUTER_API_KEY`,
-`AGENTROUTER_BASE_URL`, `AGENTROUTER_MODEL`. Everything else has working defaults.
+If Koyeb asks you for a credit card (it sometimes does, depending on region),
+use Option B instead.
 
-## Option B — Render (free tier)
+## Option B — Back4App Containers (free, guaranteed NO credit card)
 
-1. Push the repo to GitHub (already done).
-2. Open: https://render.com/deploy?repo=https://github.com/yousefessam612/academic-document-translator
-3. Log in with GitHub, paste `AGENTROUTER_API_KEY` when prompted, deploy.
-4. Link: `https://academic-document-translator.onrender.com`
+Free tier: 1 container, 0.25 CPU, 256 MB RAM. Sleeps when idle (like Render).
 
-Free Render services sleep after 15 min of inactivity (cold start ~1 min) and
-have 512 MB RAM.
+1. Go to https://www.back4app.com/container-as-a-service → Get Started.
+2. Sign up with GitHub.
+3. New deployment → connect the `academic-document-translator` GitHub repo.
+4. Add environment variable `AGENTROUTER_API_KEY` (required).
+5. Deploy — you get a `*.back4app.app` URL.
 
-## Free-tier limitations (both options)
+Note: 256 MB RAM is enough for text-based PDFs/DOCX/TXT, but heavy OCR of
+large scanned PDFs may exceed it. Prefer Koyeb when available.
+
+## Option C — Render (free 750 hrs/month, but requires a credit card)
+
+https://render.com/deploy?repo=https://github.com/yousefessam612/academic-document-translator
+
+## Free-tier limitations (all options)
 
 - **Ephemeral disk**: uploaded files, the SQLite database, and generated
   documents are wiped when the container restarts (after sleeping or
   redeploying). The terminology dictionary re-seeds automatically; use
-  Terminology → Export CSV to back up custom terms. For persistent storage use
-  HF persistent storage (~$5/mo) or a paid Render disk.
+  Terminology → Export CSV to back up custom terms. Translate and download
+  your DOCX within the same session.
 - **Public link**: anyone with the link can use the app and consume API
-  credits. On Hugging Face you can flip the Space to *Private* in Settings
-  (then only you can open it with your HF login).
-- The API key is injected as a runtime secret — it is never stored in the
-  image or the git repo.
+  credits — don't share it publicly.
+- **Cold starts**: the first visit after idle takes 10-60 seconds to wake.
+- The API key is injected as a runtime environment variable — it is never
+  stored in the image or the git repo.

@@ -36,7 +36,7 @@ RUN mkdir -p /app/storage/uploads /app/storage/processed \
 ENV TESSERACT_CMD=tesseract \
     PYTHONUNBUFFERED=1
 
-# Hugging Face Spaces uses 7860; Render injects PORT (default 10000).
-EXPOSE 7860
+# Render injects PORT; Koyeb expects the EXPOSEd port (default 8000).
+EXPOSE 8000
 WORKDIR /app/backend
-CMD python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}
+CMD python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
