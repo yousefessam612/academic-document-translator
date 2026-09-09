@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     # --- AgentRouter / LLM provider ---
     agentrouter_api_key: str = ""
     agentrouter_base_url: str = "https://agentrouter.org/v1"
-    agentrouter_model: str = ""
+    # Default model (verified working for academic translation). Override via
+    # AGENTROUTER_MODEL if your account has different models available.
+    agentrouter_model: str = "glm-5.3"
     request_timeout_seconds: float = 180.0
     # AgentRouter's WAF only accepts requests whose client fingerprint matches
     # sanctioned coding-agent clients. For the OpenAI-compatible endpoint the

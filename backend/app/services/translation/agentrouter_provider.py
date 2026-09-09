@@ -56,7 +56,7 @@ class AgentRouterProvider(TranslationProvider):
 
     # ------------------------------------------------------------------ client
     def _ensure_client(self) -> httpx.AsyncClient:
-        if not self.api_key or not self.model:
+        if not self.api_key:
             raise ProviderNotConfiguredError()
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
@@ -82,11 +82,6 @@ class AgentRouterProvider(TranslationProvider):
         if not self.api_key:
             raise ProviderNotConfiguredError(
                 "AGENTROUTER_API_KEY is missing. Add it to the .env file."
-            )
-        if not self.model:
-            raise ProviderNotConfiguredError(
-                "AGENTROUTER_MODEL is missing. Add it to the .env file "
-                "(see https://agentrouter.org for available models)."
             )
 
     # ------------------------------------------------------------- translate

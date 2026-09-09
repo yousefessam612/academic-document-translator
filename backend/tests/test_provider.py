@@ -284,14 +284,10 @@ class TestConfiguration:
         with pytest.raises(ProviderNotConfiguredError):
             asyncio.run(run())
 
-    def test_missing_model_raises(self):
+    def test_missing_model_falls_back_to_default(self):
+        """The model defaults to glm-5.3; only a missing key is fatal."""
         provider = AgentRouterProvider(api_key="k", model="", base_url="https://x/v1")
-
-        async def run():
-            await provider.translate([{"role": "user", "content": "x"}])
-
-        with pytest.raises(ProviderNotConfiguredError):
-            asyncio.run(run())
+        assert provider.get_model() == "glm-5.3"
 
     def test_validate_connection_ok(self):
         def handler(request):

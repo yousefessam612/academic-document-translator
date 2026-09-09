@@ -14,7 +14,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(TEST_ROOT / "storage")
 os.environ["MAX_CONCURRENT_TRANSLATIONS"] = "2"
 os.environ["AGENTROUTER_API_KEY"] = ""  # tests must never use real credentials
-os.environ["AGENTROUTER_MODEL"] = ""
+# Neutralize any local .env values that would change test behavior
+# (the developer's real .env may contain a site password or model overrides).
+os.environ["APP_ACCESS_PASSWORD"] = ""
 
 import pytest  # noqa: E402
 
