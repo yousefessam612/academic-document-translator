@@ -1,23 +1,23 @@
 # Never bake secrets or local state into the image
 .env
 .env.local
+**/.env
 
 # Git
 .git
 .gitignore
 
 # Python
-.venv
-venv
-__pycache__
-*.py[cod]
-.pytest_cache
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
 backend/data/*
 !backend/data/.gitkeep
 
 # Node
-node_modules
-frontend/node_modules
+**/node_modules
 frontend/dist
 
 # Storage (runtime data)
@@ -27,8 +27,9 @@ storage/outputs/*
 storage/processed/*
 !storage/*/.gitkeep
 
-# Local dev scripts artifacts
+# Local dev artifacts
 *.log
+logs
 docs
 README.md
 render.yaml
