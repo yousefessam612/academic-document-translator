@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    # Optional site-wide password (HTTP Basic Auth, any username). When set,
+    # every visitor must enter it before using the app — protects your API
+    # credits from strangers who find the public link.
+    app_access_password: str = ""
 
     # --- AgentRouter / LLM provider ---
     agentrouter_api_key: str = ""

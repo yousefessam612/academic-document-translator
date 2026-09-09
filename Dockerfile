@@ -39,4 +39,6 @@ ENV TESSERACT_CMD=tesseract \
 # Render injects PORT; Koyeb expects the EXPOSEd port (default 8000).
 EXPOSE 8000
 WORKDIR /app/backend
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8000')+'/api/health', timeout=4)" || exit 1
 CMD python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

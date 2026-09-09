@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hmac
 import traceback
 from pathlib import Path
 
@@ -96,6 +98,52 @@ async def health():
         "app": settings.app_name,
         "provider_configured": settings.provider_configured,
     }
+
+
+# Paths that must stay reachable without the site password (platform probes).
+_PUBLIC_PATHS = {"/api/health", "/healthz"}
+
+
+@app.middleware("http")
+async def access_control_middleware(request: Request, call_next):
+    """Optional site-wide password protection.
+
+    When APP_ACCESS_PASSWORD is set, requests must carry HTTP Basic
+    credentials with that password (any username). The browser prompts the
+    visitor once, then attaches the credentials automatically to every
+    same-origin request (SPA, API, file downloads). Health probes stay open.
+    The API key itself never leaves the server either way.
+    """
+    password = settings.app_access_password
+    if password:
+        path = request.url.path.rstrip("/") or "/"
+        if path not in _PUBLIC_PATHS and request.method != "OPTIONS":
+            authorized = False
+            header = request.headers.get("Authorization", "")
+            if header.startswith("Basic "):
+                try:
+                    decoded = base64.b64decode(header[6:].strip()).decode("utf-8")
+                    supplied = decoded.split(":", 1)[1] if ":" in decoded else decoded
+                    authorized = hmac.compare_digest(
+                        supplied.encode("utf-8"), password.encode("utf-8")
+                    )
+                except (ValueError, UnicodeDecodeError):
+                    authorized = False
+            if not authorized:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "This site is password protected."},
+                    headers={
+                        "WWW-Authenticate": 'Basic realm="Academic Document Translator"'
+                    },
+                )
+    return await call_next(request)
+
+
+@app.get("/healthz")
+async def healthz():
+    """Root-level health probe (unauthenticated, for platform checks)."""
+    return {"status": "ok"}
 
 
 @app.exception_handler(Exception)
