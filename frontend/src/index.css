@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Arabic text blocks */
+.rtl {
+  direction: rtl;
+  text-align: right;
+  font-family: "Segoe UI", Tahoma, "Traditional Arabic", Arial, sans-serif;
+}

@@ -1,0 +1,47 @@
+# Secrets — never commit
+.env
+*.env.local
+*.key
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+
+# Storage (runtime data, large files)
+storage/uploads/*
+storage/temp/*
+storage/outputs/*
+storage/processed/*
+!storage/uploads/.gitkeep
+!storage/temp/.gitkeep
+!storage/outputs/.gitkeep
+!storage/processed/.gitkeep
+
+# Database (the app creates it on first start)
+backend/data/*
+!backend/data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
