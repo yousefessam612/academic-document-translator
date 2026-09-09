@@ -1,3 +1,13 @@
+---
+title: Academic Document Translator
+emoji: 🌐
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Academic Document Translator
 
 A production-ready web application that translates large academic, scientific, educational, and technical documents from **English to Arabic** using an **AgentRouter-compatible LLM API**, producing a fully formatted, right-to-left Arabic Microsoft Word (.docx) document.

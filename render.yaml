@@ -1,0 +1,17 @@
+# Render.com deployment (alternative to Hugging Face Spaces).
+# One-click: https://render.com/deploy?repo=https://github.com/yousefessam612/academic-document-translator
+services:
+  - type: web
+    name: academic-document-translator
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: AGENTROUTER_API_KEY
+        sync: false # set at deploy time
+      - key: AGENTROUTER_BASE_URL
+        value: https://agentrouter.org/v1
+      - key: AGENTROUTER_MODEL
+        value: glm-5.3
+      - key: TESSERACT_CMD
+        value: tesseract
