@@ -13,4 +13,4 @@ jobs:
       - name: Probe co.agentrouter.org from datacenter IP
         env:
           AGENTROUTER_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
-        run: python scripts/co_gateway_probe_dc.py
+        run: python scripts/co_portal_fetch.py
