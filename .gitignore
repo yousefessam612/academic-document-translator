@@ -45,3 +45,7 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+.env.*.bak
+.env.bak
+*.env
