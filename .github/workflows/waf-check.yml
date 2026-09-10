@@ -1,0 +1,20 @@
+name: AgentRouter datacenter check
+
+# Manual probe: does AgentRouter accept chat-completions POSTs from a
+# datacenter IP (GitHub Actions runner on Azure)? Diagnoses whether the
+# Back4App deployment can ever call the translation API.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe AgentRouter API
+        env:
+          AGENTROUTER_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
+        run: python scripts/waf_check.py
