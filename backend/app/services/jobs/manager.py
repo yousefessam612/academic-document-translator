@@ -156,6 +156,18 @@ class JobManager:
                 return None
             if job.status not in RESUMABLE_STATUSES:
                 return job
+            # Reset chunks stuck mid-translation (dead worker / crashed runner)
+            # so they are picked up again; their completed siblings are kept.
+            stuck = list(
+                db.scalars(
+                    select(TranslationChunk).where(
+                        TranslationChunk.job_id == job_id,
+                        TranslationChunk.status == "translating",
+                    )
+                )
+            )
+            for chunk in stuck:
+                chunk.status = "pending"
             job.status = "queued"
             job.error_message = None
             db.commit()
@@ -433,8 +445,17 @@ class JobManager:
     # --------------------------------------------------------- translation
     async def _translate_chunks(self, job_id: str, job_settings: dict, handle: JobHandle) -> bool:
         """Translate all pending/failed chunks. Returns False when a fatal
-        error (already recorded on the job) stopped the run."""
+        error (already recorded on the job) stopped the run.
+
+        In remote-worker mode (WORKER_MODE=true) the cloud host cannot call
+        the LLM (AgentRouter's WAF blocks datacenter IPs); a trusted worker
+        pulls chunks via /api/worker/* instead. Here we only wait for the
+        worker to finish, honoring pause/cancel while waiting."""
         self._set_status(job_id, "translating")
+
+        if settings.worker_mode:
+            return await self._wait_for_worker(job_id, handle)
+
         engine = TranslationEngine(self.provider)
         concurrency = max(1, settings.max_concurrent_translations)
         semaphore = asyncio.Semaphore(concurrency)
@@ -521,6 +542,45 @@ class JobManager:
             if not await self._complete_oldest(window, job_id, total, since):
                 return False
         return True
+
+    async def _wait_for_worker(self, job_id: str, handle: JobHandle) -> bool:
+        """Worker mode: poll until the remote worker finishes all chunks."""
+        idle_logged = False
+        while True:
+            with SessionLocal() as db:
+                job = db.get(TranslationJob, job_id)
+                if job is None:
+                    return False
+                open_count = len(
+                    list(
+                        db.scalars(
+                            select(TranslationChunk.id).where(
+                                TranslationChunk.job_id == job_id,
+                                TranslationChunk.status.in_(("pending", "failed", "translating")),
+                            )
+                        )
+                    )
+                )
+                if open_count == 0:
+                    return True  # all chunks reached a terminal state
+            if not idle_logged:
+                logger.info(
+                    "Waiting for remote worker to translate chunks",
+                    extra={"job_id": job_id, "operation": "worker_wait", "status": "started"},
+                )
+                idle_logged = True
+            if handle.cancel_requested:
+                return True
+            if handle.pause_requested:
+                self._set_status(
+                    job_id, "paused", error_message="Paused. You can resume this translation."
+                )
+                await self._wait_for_resume(handle)
+                if handle.cancel_requested:
+                    self._set_status(job_id, "cancelled")
+                    return False
+                self._set_status(job_id, "translating")
+            await asyncio.sleep(5)
 
     async def _translate_single(
         self,

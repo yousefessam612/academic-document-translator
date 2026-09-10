@@ -75,6 +75,16 @@ class Settings(BaseSettings):
     # --- Housekeeping ---
     temp_cleanup_hours: int = 24
 
+    # --- Remote worker mode ---
+    # AgentRouter's WAF blocks API calls from datacenter IPs (cloud hosts).
+    # In worker mode the cloud app manages jobs but does NOT call the LLM
+    # itself; a trusted machine (home IP) runs scripts/cloud_worker.py, pulls
+    # pending chunks over the worker API, translates them, and posts results
+    # back. Enable with WORKER_MODE=true and set a strong WORKER_API_KEY.
+    worker_mode: bool = False
+    worker_api_key: str = ""
+    worker_claim_limit: int = 4
+
     @property
     def max_file_size_bytes(self) -> int:
         return self.max_file_size_mb * 1024 * 1024

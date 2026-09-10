@@ -128,20 +128,41 @@ class AgentRouterProvider(TranslationProvider):
             else:
                 error = self._map_status(response.status_code, response.text)
                 if error is None:
-                    try:
-                        return self._parse_response(response.json())
-                    except ModelResponseError as exc:
-                        # Malformed/empty/truncated model output — retryable.
-                        last_error = exc
+                    data = self._safe_json(response)
+                    if data is None:
+                        # A 200 with a non-JSON body is a WAF/proxy block page
+                        # (AgentRouter's Aliyun WAF serves an HTML JS-challenge
+                        # to datacenter IPs). Retryable, but with a clear cause.
+                        last_error = ModelResponseError(
+                            "Provider returned a non-JSON response (content-type: "
+                            f"{response.headers.get('content-type', 'unknown')}, body starts: "
+                            f"{response.text[:80]!r}). This is typically a WAF/proxy "
+                            "block page — the API is unreachable from this host's network."
+                        )
                         logger.warning(
-                            "Provider response rejected",
+                            "Provider returned non-JSON (WAF?) response",
                             extra={
                                 "operation": "translate",
                                 "status": "retry",
                                 "attempt": attempt,
-                                "error_type": "model_response",
+                                "error_type": "non_json_response",
                             },
                         )
+                    else:
+                        try:
+                            return self._parse_response(data)
+                        except ModelResponseError as exc:
+                            # Malformed/empty/truncated model output — retryable.
+                            last_error = exc
+                            logger.warning(
+                                "Provider response rejected",
+                                extra={
+                                    "operation": "translate",
+                                    "status": "retry",
+                                    "attempt": attempt,
+                                    "error_type": "model_response",
+                                },
+                            )
                 else:
                     last_error = error
                     logger.warning(
@@ -170,6 +191,19 @@ class AgentRouterProvider(TranslationProvider):
         raise last_error
 
     # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _safe_json(response: httpx.Response) -> dict | None:
+        """Parse a JSON object body; None when the body is not JSON (WAF pages,
+        HTML errors, empty bodies)."""
+        content_type = (response.headers.get("content-type") or "").lower()
+        if "json" not in content_type:
+            return None
+        try:
+            data = response.json()
+        except (ValueError, TypeError):
+            return None
+        return data if isinstance(data, dict) else None
+
     @staticmethod
     def _map_status(status_code: int, body: str) -> ProviderError | None:
         """Map an HTTP status to a typed error; None means success."""
@@ -254,6 +288,15 @@ class AgentRouterProvider(TranslationProvider):
             return False, "Authentication failed. Check AGENTROUTER_API_KEY."
         if response.status_code >= 400:
             return False, f"Provider returned HTTP {response.status_code}."
+        # A 200 with a non-JSON body is the WAF JS-challenge page served to
+        # datacenter IPs — the API is effectively unreachable from this host.
+        if self._safe_json(response) is None:
+            return False, (
+                "Provider returned a block page instead of the API "
+                "(datacenter IP blocked by the provider's WAF). Use remote "
+                "worker mode (WORKER_MODE=true) so a trusted machine performs "
+                "the LLM calls."
+            )
         return True, f"Connected to {self.base_url} (model: {self.model})."
 
     async def health_check(self) -> bool:

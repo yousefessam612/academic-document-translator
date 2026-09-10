@@ -46,7 +46,41 @@ https://render.com/deploy?repo=https://github.com/yousefessam612/academic-docume
   Terminology → Export CSV to back up custom terms. Translate and download
   your DOCX within the same session.
 - **Public link**: anyone with the link can use the app and consume API
-  credits — don't share it publicly.
+  credits — protect your deployment by setting `APP_ACCESS_PASSWORD`.
 - **Cold starts**: the first visit after idle takes 10-60 seconds to wake.
 - The API key is injected as a runtime environment variable — it is never
   stored in the image or the git repo.
+
+## Remote worker mode (cloud deployments) — IMPORTANT
+
+AgentRouter is behind an Aliyun WAF that serves a JS-challenge HTML page
+instead of the API to datacenter IPs — a cloud-hosted deployment cannot call
+`chat/completions` directly, regardless of the API key. Everything else
+(uploads, analysis, chunking, DOCX assembly, downloads) works fine in the
+cloud.
+
+Remote worker mode splits the work:
+
+- The **cloud app** keeps full control (jobs, context, validation,
+  terminology, TM, consistency, assembly) and exposes
+  `/api/worker/claim` + `/api/worker/result`, guarded by `WORKER_MODE=true`,
+  a `WORKER_API_KEY`, and the site password.
+- A **worker on a trusted machine** (your laptop, home IP) runs
+  `scripts/cloud_worker.py`: it claims pending chunks, performs the LLM
+  calls via the local provider, and posts results back.
+
+Setup:
+
+```powershell
+# 1. Cloud env vars: WORKER_MODE=true and WORKER_API_KEY=<strong secret>
+# 2. Locally (backend/.env has the working AGENTROUTER_API_KEY), then:
+cd C:\academic-translator\backend
+$env:WORKER_CLOUD_URL   = "https://<your-app>.b4a.run"
+$env:WORKER_SITE_PASSWORD = "<APP_ACCESS_PASSWORD>"
+$env:WORKER_API_KEY     = "<same secret as the server>"
+.\.venv\Scripts\python.exe ..\scripts\cloud_worker.py
+```
+
+While the worker runs, start translations on the cloud site as usual — they
+complete through your home connection. Ctrl+C stops the worker safely; the
+server resets interrupted chunks on resume so nothing is lost or repeated.
