@@ -5,6 +5,7 @@ No real API calls are made — zero credit consumption.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -283,6 +284,62 @@ class TestConfiguration:
 
         with pytest.raises(ProviderNotConfiguredError):
             asyncio.run(run())
+
+    def test_gemini_mode_drops_codex_wire_and_reasoning(self):
+        """Gemini's OpenAI-compatible endpoint must not receive the Codex
+        client headers (WAF workaround) nor reasoning_effort."""
+        provider = AgentRouterProvider(
+            api_key="gk-test",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            model="gemini-2.5-flash",
+        )
+        assert provider._is_gemini is True
+        seen: dict = {}
+
+        def handler(request):
+            seen["headers"] = dict(request.headers)
+            seen["payload"] = json.loads(request.content)
+            return ok_response("النص")
+
+        provider._client = httpx.AsyncClient(
+            base_url=provider.base_url,
+            headers={"Authorization": "Bearer gk-test"},
+            transport=httpx.MockTransport(handler),
+        )
+
+        async def run():
+            return await provider.translate([{"role": "user", "content": "x"}])
+
+        result = asyncio.run(run())
+        assert result.text == "النص"
+        # no codex wire headers injected on the Gemini path
+        assert "originator" not in seen["headers"]
+        assert "codex" not in seen["headers"].get("user-agent", "")
+        # no reasoning_effort in the payload
+        assert "reasoning_effort" not in seen["payload"]
+        assert seen["payload"]["model"] == "gemini-2.5-flash"
+
+    def test_agentrouter_mode_keeps_reasoning_effort(self):
+        provider = AgentRouterProvider(
+            api_key="k", base_url="https://agentrouter.org/v1", model="glm-5.3"
+        )
+        seen: dict = {}
+
+        def handler(request):
+            seen["payload"] = json.loads(request.content)
+            return ok_response("النص")
+
+        provider._client = httpx.AsyncClient(
+            base_url=provider.base_url,
+            headers={"Authorization": "Bearer k"},
+            transport=httpx.MockTransport(handler),
+        )
+
+        async def run():
+            return await provider.translate([{"role": "user", "content": "x"}])
+
+        asyncio.run(run())
+        assert seen["payload"].get("reasoning_effort") == "low"
 
     def test_missing_model_falls_back_to_default(self):
         """The model defaults to glm-5.3; only a missing key is fatal."""

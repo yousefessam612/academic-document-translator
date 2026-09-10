@@ -55,21 +55,30 @@ class AgentRouterProvider(TranslationProvider):
         self._client: httpx.AsyncClient | None = None
 
     # ------------------------------------------------------------------ client
+    @property
+    def _is_gemini(self) -> bool:
+        """Google Gemini's OpenAI-compatible endpoint (no WAF, works from
+        datacenter IPs). Needs the Codex wire headers and reasoning params
+        dropped."""
+        return "generativelanguage.googleapis.com" in self.base_url
+
     def _ensure_client(self) -> httpx.AsyncClient:
         if not self.api_key:
             raise ProviderNotConfiguredError()
         if self._client is None or self._client.is_closed:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            if not self._is_gemini:
+                # AgentRouter's WAF ("unauthorized client detected") rejects
+                # generic HTTP clients; the Codex CLI wire image is accepted
+                # on the OpenAI-compatible endpoint.
+                headers["User-Agent"] = settings.agentrouter_client_ua
+                headers["originator"] = settings.agentrouter_originator
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    # AgentRouter's WAF ("unauthorized client detected") rejects
-                    # generic HTTP clients; the Codex CLI wire image is accepted
-                    # on the OpenAI-compatible endpoint.
-                    "User-Agent": settings.agentrouter_client_ua,
-                    "originator": settings.agentrouter_originator,
-                },
+                headers=headers,
                 timeout=self.timeout,
             )
         return self._client
@@ -96,7 +105,9 @@ class AgentRouterProvider(TranslationProvider):
             # visible content is produced; a low cap yields empty content.
             "max_tokens": settings.agentrouter_max_tokens,
         }
-        if settings.agentrouter_reasoning_effort:
+        # Gemini's OpenAI-compat layer takes its own thinking parameters;
+        # only send reasoning_effort to AgentRouter-style endpoints.
+        if settings.agentrouter_reasoning_effort and not self._is_gemini:
             payload["reasoning_effort"] = settings.agentrouter_reasoning_effort
 
         attempt = 0
