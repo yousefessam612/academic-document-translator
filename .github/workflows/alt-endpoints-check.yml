@@ -1,0 +1,16 @@
+name: Alternate endpoint check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe co.agentrouter.org from datacenter IP
+        env:
+          AGENTROUTER_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
+        run: python scripts/alt_endpoints_check.py
