@@ -39,7 +39,7 @@ from app.services.translation.provider import ProviderError  # noqa: E402
 
 CLOUD_URL = os.environ.get("WORKER_CLOUD_URL", "").rstrip("/")
 SITE_PASSWORD = os.environ.get("WORKER_SITE_PASSWORD", "")
-WORKER_KEY = os.environ.get("WORKER_API_KEY", "")
+WORKER_KEY = os.environ.get("WORKER_API_KEY", "")  # optional: only if the server sets WORKER_API_KEY
 
 VALIDATION_RETRIES = 2
 
@@ -51,13 +51,11 @@ def die(msg: str) -> None:
 
 if not CLOUD_URL:
     die("Set WORKER_CLOUD_URL (e.g. https://translator-xxxx.b4a.run)")
-if not WORKER_KEY:
-    die("Set WORKER_API_KEY (must match the server's WORKER_API_KEY)")
 
 BASIC = "Basic " + base64.b64encode(f"user:{SITE_PASSWORD}".encode()).decode() if SITE_PASSWORD else ""
 HEADERS = {
     "Content-Type": "application/json",
-    "X-Worker-Key": WORKER_KEY,
+    **({"X-Worker-Key": WORKER_KEY} if WORKER_KEY else {}),
     **({"Authorization": BASIC} if BASIC else {}),
 }
 
@@ -86,11 +84,9 @@ async def main() -> None:
 
     status, info = cloud("/api/worker/status")
     if status == 401:
-        die(f"Worker key rejected: {info.get('detail')}")
-    if status == 503:
-        die(f"Server not configured for workers: {info.get('detail')}")
+        die(f"Rejected: {info.get('detail')} (check WORKER_API_KEY / site password)")
     if status == 404:
-        die("Worker mode disabled on server (set WORKER_MODE=true and redeploy).")
+        die(f"Worker endpoints not found — the cloud app needs the latest deploy: {info.get('detail')}")
     if status != 200:
         die(f"Unexpected status {status}: {info}")
     print(f"connected: {info}")

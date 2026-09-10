@@ -64,11 +64,14 @@ def _seed_job(chunks_chars: int = 400) -> tuple[str, str]:
 
 
 class TestWorkerAuth:
-    def test_disabled_when_worker_mode_off(self, client):
+    def test_endpoints_available_without_worker_mode(self, client):
+        """Worker endpoints are always available (auto-detection); when no
+        WORKER_API_KEY is configured, the site password is the only gate."""
         response = client.get("/api/worker/status", headers=WORKER_HEADERS)
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert response.json()["mode"] == "worker"
 
-    def test_requires_worker_key(self, client, worker_env):
+    def test_requires_worker_key_when_configured(self, client, worker_env):
         response = client.get("/api/worker/status")
         assert response.status_code == 401
         response = client.get("/api/worker/status", headers={"X-Worker-Key": "wrong"})
@@ -199,6 +202,60 @@ class TestClaimAndResult:
             json={"chunk_id": "nope", "ok": True, "translation": "x"},
         )
         assert response.status_code == 404
+
+
+class TestAutoDelegation:
+    """The manager must auto-detect the WAF block-page signature and delegate
+    to the remote worker without any configuration."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        from app.services.jobs.manager import JobManager
+
+        JobManager._LLM_REACHABLE = None
+        yield
+        JobManager._LLM_REACHABLE = None
+
+    @pytest.mark.asyncio
+    async def test_waf_signature_delegates(self, monkeypatch):
+        from app.services.jobs.manager import JobManager
+
+        async def blocked(self):
+            return False, "Provider returned a block page instead of the API (datacenter IP blocked...)."
+
+        manager = JobManager(provider=MockProvider())
+        monkeypatch.setattr(type(manager.provider), "validate_connection", blocked)
+        assert await manager._should_delegate_to_worker() is True
+
+    @pytest.mark.asyncio
+    async def test_healthy_provider_does_not_delegate(self, monkeypatch):
+        from app.services.jobs.manager import JobManager
+
+        manager = JobManager(provider=MockProvider())  # validate -> (True, ...)
+        assert await manager._should_delegate_to_worker() is False
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_does_not_delegate(self, monkeypatch):
+        """A bad key must surface as a real error, not endless waiting."""
+        from app.services.jobs.manager import JobManager
+
+        async def auth_fail(self):
+            return False, "Authentication failed. Check AGENTROUTER_API_KEY."
+
+        manager = JobManager(provider=MockProvider())
+        monkeypatch.setattr(type(manager.provider), "validate_connection", auth_fail)
+        assert await manager._should_delegate_to_worker() is False
+
+    @pytest.mark.asyncio
+    async def test_explicit_worker_mode_forces_delegation(self, monkeypatch):
+        from app.services.jobs.manager import JobManager
+
+        monkeypatch.setattr(settings, "worker_mode", True, raising=False)
+        manager = JobManager(provider=MockProvider())
+        try:
+            assert await manager._should_delegate_to_worker() is True
+        finally:
+            monkeypatch.setattr(settings, "worker_mode", False, raising=False)
 
 
 class TestWorkerModePipeline:

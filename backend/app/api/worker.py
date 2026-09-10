@@ -3,22 +3,20 @@ cloud deployment.
 
 Why: AgentRouter's Aliyun WAF blocks chat-completions POSTs from datacenter
 IPs (it serves an HTML JS-challenge instead of JSON). Everything else about
-the cloud deployment works. In worker mode the cloud app keeps full control
-(jobs, context building, validation, TM, consistency, assembly) and only the
-LLM call itself is relayed through a worker running on a trusted network.
+the cloud deployment works. The cloud app keeps full control (jobs, context
+building, validation, TM, consistency, assembly) and only the LLM call itself
+is relayed through a worker running on a trusted network.
 
-Auth: the site password (APP_ACCESS_PASSWORD, as HTTP Basic) PLUS the
-X-Worker-Key header matching WORKER_API_KEY.
+Auth: the site password (APP_ACCESS_PASSWORD, enforced by the Basic-auth
+middleware on every route) PLUS the X-Worker-Key header when the server has
+WORKER_API_KEY configured. No dedicated setup is required — the JobManager
+auto-detects the WAF block and waits for a worker.
 """
 from __future__ import annotations
 
-import time
-import uuid
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -51,15 +49,12 @@ def _get_engine() -> TranslationEngine:
 
 
 def _check_worker_key(request: Request, x_worker_key: str | None) -> None:
-    """Worker endpoints require the site password (Basic auth middleware)
-    plus the dedicated worker key."""
-    if not settings.worker_mode:
-        raise HTTPException(status_code=404, detail="Worker mode is not enabled on this server.")
-    if not settings.worker_api_key:
-        raise HTTPException(status_code=503, detail="WORKER_API_KEY is not configured on the server.")
-    expected = settings.worker_api_key
-    if x_worker_key is None or not x_worker_key.strip() or x_worker_key.strip() != expected:
-        raise HTTPException(status_code=401, detail="Invalid worker key.")
+    """Worker endpoints sit behind the site-password middleware. When the
+    server has WORKER_API_KEY configured, the header must match it too."""
+    if settings.worker_api_key:
+        expected = settings.worker_api_key
+        if x_worker_key is None or not x_worker_key.strip() or x_worker_key.strip() != expected:
+            raise HTTPException(status_code=401, detail="Invalid worker key.")
 
 
 class ClaimRequest(BaseModel):

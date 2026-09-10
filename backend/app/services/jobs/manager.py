@@ -447,13 +447,12 @@ class JobManager:
         """Translate all pending/failed chunks. Returns False when a fatal
         error (already recorded on the job) stopped the run.
 
-        In remote-worker mode (WORKER_MODE=true) the cloud host cannot call
-        the LLM (AgentRouter's WAF blocks datacenter IPs); a trusted worker
-        pulls chunks via /api/worker/* instead. Here we only wait for the
-        worker to finish, honoring pause/cancel while waiting."""
+        When the LLM is unreachable from this host (AgentRouter's WAF blocks
+        datacenter IPs) — or WORKER_MODE=true — the job waits for a remote
+        worker instead of calling the LLM here."""
         self._set_status(job_id, "translating")
 
-        if settings.worker_mode:
+        if await self._should_delegate_to_worker():
             return await self._wait_for_worker(job_id, handle)
 
         engine = TranslationEngine(self.provider)
@@ -543,6 +542,34 @@ class JobManager:
                 return False
         return True
 
+    # Reachability cache: (timestamp, reachable) — avoids probing the provider
+    # for every job while a deployment is WAF-blocked.
+    _LLM_REACHABLE: tuple[float, bool] | None = None
+
+    async def _should_delegate_to_worker(self) -> bool:
+        """True when this host cannot call the LLM directly and a remote
+        worker must relay the calls.
+
+        Delegation happens when WORKER_MODE=true is set explicitly, or when
+        the provider probe returns the WAF block-page signature (the provider
+        is reachable from residential IPs but blocked from datacenter IPs).
+        Other failures (bad key, network down) are NOT delegated — they must
+        surface as real errors."""
+        if settings.worker_mode:
+            return True
+        now = time.monotonic()
+        cached = JobManager._LLM_REACHABLE
+        if cached and now - cached[0] < 300:
+            reachable = cached[1]
+        else:
+            try:
+                ok, detail = await self.provider.validate_connection()
+            except Exception:  # noqa: BLE001 — probe must never crash a job
+                ok, detail = False, ""
+            reachable = ok or "block page" not in (detail or "")
+            JobManager._LLM_REACHABLE = (now, reachable)
+        return not reachable
+
     async def _wait_for_worker(self, job_id: str, handle: JobHandle) -> bool:
         """Worker mode: poll until the remote worker finishes all chunks."""
         idle_logged = False
@@ -568,6 +595,18 @@ class JobManager:
                     "Waiting for remote worker to translate chunks",
                     extra={"job_id": job_id, "operation": "worker_wait", "status": "started"},
                 )
+                # Informational hint for the Progress page (shown as a warning
+                # banner; status stays 'translating').
+                with SessionLocal() as db:
+                    job = db.get(TranslationJob, job_id)
+                    if job and not job.error_message:
+                        job.error_message = (
+                            "This server cannot reach the translation API directly "
+                            "(datacenter IP blocked by the provider). Start the "
+                            "translation worker (scripts/cloud_worker.py) on the "
+                            "trusted machine to continue."
+                        )
+                        db.commit()
                 idle_logged = True
             if handle.cancel_requested:
                 return True
