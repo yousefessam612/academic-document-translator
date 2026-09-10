@@ -38,6 +38,15 @@ def make_provider(handler, retries: int = 3, base_delay: float = 0.0) -> AgentRo
     return provider
 
 
+@pytest.fixture(autouse=True)
+def _fast_rate_limit_waits(monkeypatch):
+    """Keep rate-limit retry tests fast: real waits are 15-120s in production."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "rate_limit_base_delay", 0.01, raising=False)
+    monkeypatch.setattr(settings, "rate_limit_max_retries", 8, raising=False)
+
+
 def ok_response(content: str) -> httpx.Response:
     return httpx.Response(
         200,
@@ -128,6 +137,64 @@ class TestErrorMapping:
         result = asyncio.run(run())
         assert result.text == "بعد إعادة المحاولة"
         assert calls["n"] == 3
+
+    def test_rate_limit_gets_more_attempts_than_other_errors(self):
+        """429 must survive far more attempts than the normal max_retries."""
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            return httpx.Response(
+                429,
+                json={"error": "rate limited"},
+                headers={"retry-after": "0"},  # keep the test fast
+            )
+
+        provider = make_provider(handler, retries=3)
+
+        async def run():
+            await provider.translate([{"role": "user", "content": "x"}])
+
+        with pytest.raises(RateLimitError):
+            asyncio.run(run())
+        # normal retries=3 would stop at 3; rate-limit patience is higher
+        assert calls["n"] > 3, "rate-limited requests must get extra attempts"
+
+    def test_retry_after_header_respected(self):
+        """The wait duration must honor the server's Retry-After header."""
+        waits: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def fake_sleep(seconds: float):
+            waits.append(seconds)
+            await original_sleep(0)
+
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # A distinctive value the fallback formula would never produce
+                return httpx.Response(
+                    429, json={"error": "rate limited"}, headers={"retry-after": "7"}
+                )
+            return ok_response("تم")
+
+        provider = make_provider(handler)
+
+        async def run():
+            import app.services.translation.agentrouter_provider as mod
+
+            original = mod.asyncio.sleep
+            mod.asyncio.sleep = fake_sleep
+            try:
+                return await provider.translate([{"role": "user", "content": "x"}])
+            finally:
+                mod.asyncio.sleep = original
+
+        result = asyncio.run(run())
+        assert result.text == "تم"
+        assert waits and abs(waits[0] - 7) < 3, f"expected ~7s from Retry-After, got {waits}"
 
     def test_server_error_retried_then_fails(self):
         calls = {"n": 0}
@@ -341,8 +408,11 @@ class TestConfiguration:
         asyncio.run(run())
         assert seen["payload"].get("reasoning_effort") == "low"
 
-    def test_missing_model_falls_back_to_default(self):
-        """The model defaults to glm-5.3; only a missing key is fatal."""
+    def test_missing_model_falls_back_to_default(self, monkeypatch):
+        """With no model configured, the default from settings is used."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "agentrouter_model", "glm-5.3", raising=False)
         provider = AgentRouterProvider(api_key="k", model="", base_url="https://x/v1")
         assert provider.get_model() == "glm-5.3"
 

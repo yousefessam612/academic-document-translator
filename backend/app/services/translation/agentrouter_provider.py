@@ -34,6 +34,25 @@ from app.utils.text import estimate_tokens, looks_like_json_object, strip_respon
 logger = get_logger(__name__)
 
 
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header (seconds or HTTP-date); None if absent/bad."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        seconds = int(value)
+        return float(min(seconds, 300))
+    from email.utils import parsedate_to_datetime
+
+    try:
+        from datetime import datetime, timezone
+
+        target = parsedate_to_datetime(value)
+        return max(0.0, (target - datetime.now(timezone.utc)).total_seconds())
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 class AgentRouterProvider(TranslationProvider):
     name = "agentrouter"
 
@@ -112,7 +131,13 @@ class AgentRouterProvider(TranslationProvider):
 
         attempt = 0
         last_error: ProviderError | None = None
-        while attempt < max(1, self.max_retries):
+        # Rate limits (HTTP 429) on free tiers are common and purely temporal —
+        # they get far more patience than other errors: many attempts with
+        # long, escalating waits, honoring the server's Retry-After when sent.
+        rate_limit_max_retries = max(self.max_retries, settings.rate_limit_max_retries)
+        last_was_rate_limit = False
+        retry_after_hint: float | None = None
+        while True:
             attempt += 1
             # Escalate the token cap on retries: a reasoning model can exhaust
             # max_tokens thinking and return empty/truncated content; doubling
@@ -124,6 +149,7 @@ class AgentRouterProvider(TranslationProvider):
                 response = await client.post("/chat/completions", json=payload)
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_error = TransientAPIError(f"Network error: {type(exc).__name__}")
+                last_was_rate_limit = False
                 logger.warning(
                     "Provider network error",
                     extra={"operation": "translate", "status": "error", "attempt": attempt,
@@ -131,12 +157,14 @@ class AgentRouterProvider(TranslationProvider):
                 )
             except httpx.HTTPError as exc:
                 last_error = TransientAPIError(f"HTTP error: {type(exc).__name__}")
+                last_was_rate_limit = False
                 logger.warning(
                     "Provider HTTP error",
                     extra={"operation": "translate", "status": "error", "attempt": attempt,
                            "error_type": type(exc).__name__},
                 )
             else:
+                retry_after_hint = _parse_retry_after(response.headers.get("retry-after"))
                 error = self._map_status(response.status_code, response.text)
                 if error is None:
                     data = self._safe_json(response)
@@ -176,6 +204,7 @@ class AgentRouterProvider(TranslationProvider):
                             )
                 else:
                     last_error = error
+                    last_was_rate_limit = isinstance(error, RateLimitError)
                     logger.warning(
                         "Provider API error",
                         extra={
@@ -189,14 +218,30 @@ class AgentRouterProvider(TranslationProvider):
                     if not error.retryable:
                         raise error
 
-            if attempt < self.max_retries:
-                delay = self.retry_base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
-                logger.info(
-                    "Retrying translation request",
-                    extra={"operation": "translate", "status": "retry", "attempt": attempt,
-                           "delay_seconds": round(delay, 1)},
+            # Decide whether another attempt is allowed.
+            if last_was_rate_limit:
+                allowed = attempt < rate_limit_max_retries
+            else:
+                allowed = attempt < max(1, self.max_retries)
+            if not allowed:
+                break
+
+            if last_was_rate_limit:
+                # Long, patient waits: free-tier rate windows reset per minute,
+                # so wait it out instead of burning attempts.
+                delay = retry_after_hint or min(
+                    settings.rate_limit_base_delay * attempt, 120.0
                 )
-                await asyncio.sleep(delay)
+                delay += random.uniform(0, 2)
+            else:
+                delay = self.retry_base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
+            logger.info(
+                "Retrying translation request",
+                extra={"operation": "translate", "status": "retry", "attempt": attempt,
+                       "delay_seconds": round(delay, 1),
+                       "rate_limited": last_was_rate_limit},
+            )
+            await asyncio.sleep(delay)
 
         assert last_error is not None
         raise last_error

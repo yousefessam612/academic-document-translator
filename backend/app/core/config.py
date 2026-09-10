@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     max_concurrent_translations: int = 2
     max_retries: int = 3
     retry_base_delay_seconds: float = 2.0
+    # Rate limits (HTTP 429) are temporary by nature — free-tier providers
+    # (e.g. Gemini) enforce per-minute windows. These get many more attempts
+    # with long, patient waits instead of failing the chunk.
+    rate_limit_max_retries: int = 8
+    rate_limit_base_delay: float = 15.0
     chunk_target_chars: int = 4000
     chunk_max_chars: int = 6000
     context_chars: int = 1500
