@@ -1,4 +1,4 @@
-name: Alternate endpoint check
+name: Free endpoints reachability check
 
 on:
   workflow_dispatch:
@@ -10,7 +10,5 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Probe co.agentrouter.org from datacenter IP
-        env:
-          AGENTROUTER_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
-        run: python scripts/co_portal_fetch.py
+      - name: Probe free LLM endpoints from datacenter IP
+        run: python scripts/free_endpoints_probe.py
